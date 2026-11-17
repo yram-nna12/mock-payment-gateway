@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Mock payment checkout</title>
     <link rel="stylesheet" href="<?= base_url('css/checkout.css') ?>">
+    <link rel="stylesheet" href="<?= base_url('css/gateway.css') ?>">
 </head>
 <body>
 <main>
@@ -55,7 +56,9 @@
         </div>
     <?php else: ?>
         <p class="result">This transaction is <?= esc($payment['payment_status']) ?>. Terminal results cannot be changed.</p>
+        <p><a href="<?= site_url('checkout/' . rawurlencode($payment['transaction_reference']) . '/' . rawurlencode($token) . '/receipt') ?>">View printable receipt</a> · <a href="<?= site_url('checkout/' . rawurlencode($payment['transaction_reference']) . '/' . rawurlencode($token) . '/receipt/download') ?>">Download HTML receipt</a></p>
     <?php endif ?>
+    <?php if ($payment['payment_status'] === 'pending'): ?><form method="post" action="<?= site_url('checkout/' . rawurlencode($payment['transaction_reference']) . '/' . rawurlencode($token) . '/cancel') ?>"><?= csrf_field() ?><p><button class="secondary" type="submit">Cancel simulated payment</button></p></form><?php endif ?>
     <?php $returnSeparator = strpos($returnUrl, '?') === false ? '?' : '&'; ?>
     <p><a href="<?= esc($returnUrl . $returnSeparator . 'payment_reference=' . rawurlencode($payment['transaction_reference']), 'attr') ?>">Return to TechReserve and verify payment</a></p>
 </main>

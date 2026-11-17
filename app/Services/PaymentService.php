@@ -93,7 +93,7 @@ class PaymentService
 
     public function settle(string $reference, string $token, string $outcome): array
     {
-        if (!in_array($outcome, ['paid', 'failed'], true)) {
+        if (!in_array($outcome, ['paid', 'failed', 'cancelled'], true)) {
             throw new PaymentException(422, 'invalid_outcome', 'Unsupported simulated payment outcome.');
         }
 

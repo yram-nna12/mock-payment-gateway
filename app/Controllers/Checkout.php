@@ -42,6 +42,34 @@ class Checkout extends BaseController
         }
     }
 
+    public function receipt(string $reference, string $token)
+    {
+        try {
+            $payment = (new PaymentService())->checkout($reference, $token);
+            if ($payment['payment_status'] === 'pending') {
+                throw new PaymentException(404, 'receipt_not_ready', 'A receipt is available after this payment is completed.');
+            }
+            return view('receipt', compact('payment'));
+        } catch (PaymentException $exception) {
+            return $this->checkoutError($exception->httpStatus, $exception->getMessage());
+        }
+    }
+
+    public function downloadReceipt(string $reference, string $token)
+    {
+        try {
+            $payment = (new PaymentService())->checkout($reference, $token);
+            if ($payment['payment_status'] === 'pending') {
+                throw new PaymentException(404, 'receipt_not_ready', 'A receipt is available after this payment is completed.');
+            }
+            return $this->response->setHeader('Content-Type', 'text/html; charset=UTF-8')
+                ->setHeader('Content-Disposition', 'attachment; filename="payment-receipt-' . rawurlencode($reference) . '.html"')
+                ->setBody(view('receipt', compact('payment')));
+        } catch (PaymentException $exception) {
+            return $this->checkoutError($exception->httpStatus, $exception->getMessage());
+        }
+    }
+
     public function completeCard(string $reference, string $token)
     {
         try {

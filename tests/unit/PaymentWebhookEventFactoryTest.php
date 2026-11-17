@@ -20,11 +20,17 @@ final class PaymentWebhookEventFactoryTest extends TestCase
         $this->assertArrayNotHasKey('student_name', $event);
     }
 
-    public function testRejectsUnsupportedPaymentState(): void
+    public function testEncodesCancelledAndRejectsUnsupportedPaymentState(): void
     {
+        $event = json_decode(PaymentWebhookEventFactory::encode(
+            array_replace($this->payment(), ['payment_status' => 'cancelled']),
+            PaymentWebhookEventFactory::newEventId(),
+            '2026-11-17 14:30:00'
+        ), true, 16, JSON_THROW_ON_ERROR);
+        $this->assertSame('cancelled', $event['status']);
         try {
             PaymentWebhookEventFactory::encode(
-                array_replace($this->payment(), ['payment_status' => 'cancelled']),
+                array_replace($this->payment(), ['payment_status' => 'refunded']),
                 PaymentWebhookEventFactory::newEventId(),
                 '2026-11-17 14:30:00'
             );

@@ -23,7 +23,7 @@ final class PaymentWebhookEventFactory
     public static function encode(array $payment, string $eventId, string $occurredAt): string
     {
         $status = $payment['payment_status'] ?? null;
-        if (!in_array($status, ['paid', 'failed', 'expired'], true)
+        if (!in_array($status, ['paid', 'failed', 'cancelled', 'expired'], true)
             || preg_match('/\A[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\z/i', $eventId) !== 1
             || !self::isDate($occurredAt)
             || !is_string($payment['transaction_reference'] ?? null)
