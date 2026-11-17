@@ -6,7 +6,8 @@ use App\Libraries\PaymentException;
 
 class PaymentPayload
 {
-    private const METHODS = ['gcash', 'bank_transfer'];
+    // bank_transfer remains accepted so existing gateway transactions stay compatible.
+    private const METHODS = ['card', 'gcash', 'bank_transfer'];
 
     public static function normalize(array $input): array
     {

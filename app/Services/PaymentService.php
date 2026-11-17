@@ -109,6 +109,7 @@ class PaymentService
                 $this->db->table('payment_transactions')->where('id', $record['id'])
                     ->where('payment_status', 'pending')->update($update);
                 $record = array_merge($record, $update);
+                $this->queueWebhookDelivery($record);
             }
             return $record;
         });
@@ -151,8 +152,42 @@ class PaymentService
                 ->update(['payment_status' => 'expired', 'updated_at' => $now]);
             $record['payment_status'] = 'expired';
             $record['updated_at'] = $now;
+            $this->queueWebhookDelivery($record);
         }
         return $record;
+    }
+
+    private function queueWebhookDelivery(array $payment): void
+    {
+        $settings = config('PaymentGateway');
+        WebhookUrlPolicy::assertAllowed($settings->techReserveWebhookUrl);
+
+        $eventId = PaymentWebhookEventFactory::newEventId();
+        $eventType = 'payment.status.changed';
+        $occurredAt = $payment['updated_at'] ?? gmdate('Y-m-d H:i:s');
+        $body = PaymentWebhookEventFactory::encode($payment, $eventId, $occurredAt);
+        $now = gmdate('Y-m-d H:i:s');
+
+        if (!$this->db->table('webhook_deliveries')->insert([
+            'payment_transaction_id' => $payment['id'],
+            'event_id' => $eventId,
+            'callback_url' => $settings->techReserveWebhookUrl,
+            'event_type' => $eventType,
+            'payload' => $body,
+            'delivery_status' => 'pending',
+            'attempts' => 0,
+            'max_attempts' => 3,
+            'response_code' => null,
+            'last_error' => null,
+            'next_retry_at' => $now,
+            'locked_at' => null,
+            'lease_token' => null,
+            'delivered_at' => null,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ])) {
+            throw new \RuntimeException('The payment webhook event could not be queued.');
+        }
     }
 
     private function assertCheckoutToken(string $reference, string $token): void

@@ -39,6 +39,11 @@ database.tests.password =
 # Mock payment API key. Set only in the local .env; never commit its value.
 paymentGateway.apiKey =
 
+# Fixed TechReserve webhook destination and shared signing secret.
+# Configure the same private secret in TechReserve's local .env.
+paymentGateway.techReserveWebhookUrl = http://127.0.0.1:8083/api/v1/webhooks/payments
+paymentGateway.webhookSecret =
+
 # A fixed TechReserve reservation-history URL shown after simulated checkout.
 # This is informational; the gateway does not redirect to arbitrary URLs.
 paymentGateway.techReserveReturnUrl = http://127.0.0.1:8083/borrower/payments/return

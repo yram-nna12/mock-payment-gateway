@@ -63,9 +63,9 @@ final class PaymentGatewayTest extends CIUnitTestCase
         }
     }
 
-    public function testSuccessfulAndFailedGcashAndBankTransferSimulations(): void
+    public function testSuccessfulAndFailedSupportedPaymentSimulations(): void
     {
-        foreach ([['gcash', 'paid'], ['gcash', 'failed'], ['bank_transfer', 'paid'], ['bank_transfer', 'failed']] as [$method, $outcome]) {
+        foreach ([['gcash', 'paid'], ['gcash', 'failed'], ['card', 'paid'], ['card', 'failed'], ['bank_transfer', 'paid'], ['bank_transfer', 'failed']] as [$method, $outcome]) {
             $response = $this->initiate($this->payload(['payment_method' => $method]));
             $response->assertStatusCode(201);
             $url = json_decode($response->getJSON(), true, 512, JSON_THROW_ON_ERROR)['data']['checkout_url'];

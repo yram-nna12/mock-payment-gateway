@@ -12,6 +12,10 @@ in the untracked local `.env`; do not commit them. Configure
 `paymentGateway.apiKey` to a long random mock secret and configure the local
 application URL for port 8082. The TechReserve return link is a fixed
 configuration value; the API does not accept a browser-supplied return URL.
+Set `paymentGateway.techReserveWebhookUrl` to the fixed TechReserve webhook
+endpoint and configure the same private, random `paymentGateway.webhookSecret`
+in both applications. Do not place the signing secret in source control or
+send it to a browser.
 
 Normal application database settings remain separate from the PHPUnit
 connection. See [ISOLATED-TESTING.md](../ISOLATED-TESTING.md) to create and
@@ -120,10 +124,31 @@ lookup on return. Configure it as
 
 Initial state is `pending`. Simulated success changes it to `paid`; simulated
 decline/failure changes it to `failed`. A pending transaction expires after
-30 minutes. Status lookup and checkout access enforce expiry in the database,
-so no background worker is required. Replayed initiation does not extend the
-expiry. `paid`, `failed`, and `expired` are terminal and cannot be overwritten.
-Refunds, callbacks, webhooks, and real payment methods are not implemented.
+30 minutes. Status lookup and checkout access enforce expiry in the database.
+Replayed initiation does not extend the expiry. `paid`, `failed`, and `expired`
+are terminal and cannot be overwritten. Cancellation and refunds are not
+implemented.
+
+## Payment webhook delivery
+
+When a payment transitions to `paid`, `failed`, or `expired`, the gateway
+stores a version-1 `payment.status.changed` event in `webhook_deliveries` in
+the same database transaction. Its fixed callback URL cannot be supplied in a
+payment request. Each event has a stable UUID and an immutable JSON body.
+
+Each delivery attempt signs the exact raw body using
+`timestamp + "\n" + event-id + "\n" + body` and the shared webhook secret.
+Headers are `X-Payment-Event-Id`, `X-Payment-Timestamp`, and
+`X-Payment-Signature: v1=<HMAC-SHA256 hex>`. The timestamp is refreshed for
+each attempt; the event ID and body remain unchanged. Redirects are disabled.
+
+Run `php spark payments:deliver-webhooks [limit]` periodically. Network errors,
+HTTP 408, 429, and 5xx responses are retried with bounded exponential backoff;
+other non-2xx responses are recorded as permanent failures. Delivery attempts,
+response codes, sanitized error codes, and leases are stored in the outbox.
+The additive `AddWebhookDeliveryLeaseFields` migration has been created but
+not executed. Delivery cannot run until both the gateway and TechReserve
+receipt migrations are applied and the shared secret is configured.
 
 ## Tests
 

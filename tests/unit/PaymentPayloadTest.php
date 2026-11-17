@@ -23,6 +23,9 @@ final class PaymentPayloadTest extends TestCase
         ], $payload['rented_items']);
         $this->assertSame('1500.00', $payload['amount']);
         $this->assertSame('PHP', $payload['currency']);
+
+        $card = PaymentPayload::normalize($this->payload(['payment_method' => 'card']));
+        $this->assertSame('card', $card['payment_method']);
     }
 
     public function testRejectsInvalidOrRealPaymentInputs(): void
@@ -34,6 +37,7 @@ final class PaymentPayloadTest extends TestCase
             ['currency' => 'USD'],
             ['payment_method' => 'real_gcash'],
             ['account_number' => 'must-not-be-accepted'],
+            ['callback_url' => 'http://attacker.invalid/'],
             ['rented_items' => []],
             ['rented_items' => [['name' => 'Room', 'type' => 'facility', 'quantity' => 0]]],
         ] as $overrides) {
