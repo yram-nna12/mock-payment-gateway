@@ -1,69 +1,150 @@
-# CodeIgniter 4 Application Starter
+# Mock Payment Gateway
 
-## What is CodeIgniter?
+This local CodeIgniter 4 application provides a simulated payment API and
+hosted checkout for TechReserve. It supports **Mock GCash** and **Mock Bank
+Transfer** only. It never connects to a real wallet or bank and never moves
+real money.
 
-CodeIgniter is a PHP full-stack web framework that is light, fast, flexible and secure.
-More information can be found at the [official site](https://codeigniter.com).
+## Local configuration
 
-This repository holds a composer-installable app starter.
-It has been built from the
-[development repository](https://github.com/codeigniter4/CodeIgniter4).
+Copy `env` to `.env` if needed. Keep the API key and database credentials only
+in the untracked local `.env`; do not commit them. Configure
+`paymentGateway.apiKey` to a long random mock secret and configure the local
+application URL for port 8082. The TechReserve return link is a fixed
+configuration value; the API does not accept a browser-supplied return URL.
 
-More information about the plans for version 4 can be found in [CodeIgniter 4](https://forum.codeigniter.com/forumdisplay.php?fid=28) on the forums.
+Normal application database settings remain separate from the PHPUnit
+connection. See [ISOLATED-TESTING.md](../ISOLATED-TESTING.md) to create and
+verify `mock_payment_gateway_test_db` and configure restricted test-only
+credentials. Never point tests at `payment_gateway_db`.
 
-You can read the [user guide](https://codeigniter.com/user_guide/)
-corresponding to the latest version of the framework.
+## API contract
 
-## Installation & updates
+All API paths are under `/api/v1`. Requests and responses use JSON. Every API
+request requires `X-API-Key` with the local server-to-server key.
 
-`composer create-project codeigniter4/appstarter` then `composer update` whenever
-there is a new release of the framework.
+### Initiate or replay a payment
 
-When updating, check the release notes to see if there are any changes you might need to apply
-to your `app` folder. The affected files can be copied or merged from
-`vendor/codeigniter4/framework/app`.
+`POST /api/v1/payments`
 
-## Setup
+Request:
 
-Copy `env` to `.env` and tailor for your app, specifically the baseURL
-and any database settings.
+```json
+{
+  "transaction_reference": "TRX-unique-reference",
+  "reservation_reference": "RES-42",
+  "student_id": "SYNTHETIC-STUDENT",
+  "student_name": "Synthetic Borrower",
+  "rented_items": [
+    {"name": "Seminar Room", "type": "facility", "quantity": 1},
+    {"name": "Projector", "type": "equipment", "quantity": 2}
+  ],
+  "amount": "1500.00",
+  "currency": "PHP",
+  "payment_method": "gcash"
+}
+```
 
-## Important Change with index.php
+`payment_method` is `gcash` or `bank_transfer`. Amount must be a positive
+decimal string with exactly two fractional digits and fit `DECIMAL(10,2)`.
+`rented_items` contains 1–20 item objects; `type` is `facility` or `equipment`.
+Account number is not required, stored, or transmitted. Unknown request fields
+are rejected.
 
-`index.php` is no longer in the root of the project! It has been moved inside the *public* folder,
-for better security and separation of components.
+New payment: HTTP `201 Created`.
+Identical retry with the same transaction reference: HTTP `200 OK`, returning
+the original gateway transaction and expiry.
+Conflicting reuse of a reference: HTTP `409 Conflict`.
 
-This means that you should configure your web server to "point" to your project's *public* folder, and
-not to the project root. A better practice would be to configure a virtual host to point there. A poor practice would be to point your web server to the project root and expect to enter *public/...*, as the rest of your logic and the
-framework are exposed.
+```json
+{
+  "data": {
+    "transaction_reference": "TRX-unique-reference",
+    "gateway_transaction_id": "gw-...",
+    "reservation_reference": "RES-42",
+    "amount": "1500.00",
+    "currency": "PHP",
+    "payment_method": "gcash",
+    "status": "pending",
+    "created_at": "2026-11-17 06:00:00",
+    "expires_at": "2026-11-17 06:30:00",
+    "checkout_url": "http://127.0.0.1:8082/checkout/TRX-unique-reference/<opaque-token>"
+  }
+}
+```
 
-**Please** read the user guide for a better explanation of how CI4 works!
+The checkout token is derived from the server secret and transaction reference;
+only the hosted-checkout URL contains it. The API key is never returned.
 
-## Repository Management
+### Retrieve authoritative status
 
-We use GitHub issues, in our main repository, to track **BUGS** and to track approved **DEVELOPMENT** work packages.
-We use our [forum](http://forum.codeigniter.com) to provide SUPPORT and to discuss
-FEATURE REQUESTS.
+`GET /api/v1/payments/{transaction_reference}`
 
-This repository is a "distribution" one, built by our release preparation script.
-Problems with it can be raised on our forum, or as issues in the main repository.
+Requires the same `X-API-Key` header. HTTP `200 OK` returns:
 
-## Server Requirements
+```json
+{
+  "data": {
+    "transaction_reference": "TRX-unique-reference",
+    "gateway_transaction_id": "gw-...",
+    "amount": "1500.00",
+    "currency": "PHP",
+    "payment_method": "gcash",
+    "status": "pending",
+    "created_at": "2026-11-17 06:00:00",
+    "paid_at": null,
+    "expires_at": "2026-11-17 06:30:00",
+    "updated_at": "2026-11-17 06:00:00"
+  }
+}
+```
 
-PHP version 8.2 or higher is required, with the following extensions installed:
+Unknown references return `404`. Invalid/missing credentials return `401`;
+an unset server API key returns `503`. Invalid JSON returns `400`. Invalid
+fields, amount, currency, or method return `422`. Temporary database failures
+return a generic `503`. Errors use
+`{"error":{"code":"stable_code","message":"Safe description"}}`.
 
-- [intl](http://php.net/manual/en/intl.requirements.php)
-- [mbstring](http://php.net/manual/en/mbstring.installation.php)
+## Hosted checkout and state
 
-> [!WARNING]
-> - The end of life date for PHP 7.4 was November 28, 2022.
-> - The end of life date for PHP 8.0 was November 26, 2023.
-> - The end of life date for PHP 8.1 was December 31, 2025.
-> - If you are still using below PHP 8.2, you should upgrade immediately.
-> - The end of life date for PHP 8.2 will be December 31, 2026.
+The hosted page displays the reservation reference, amount in PHP, payment
+method, transaction reference, and a clear simulation notice. It offers only
+the method-appropriate success and failure simulation buttons. It never asks
+for a real wallet PIN, OTP, password, bank credential, or account number.
+State-changing checkout forms use CSRF protection. The checkout return link is
+fixed configuration and there is no user-controlled redirect target. The
+gateway adds the transaction reference to that configured return URL so
+TechReserve can authenticate the borrower and perform a server-side status
+lookup on return. Configure it as
+`http://127.0.0.1:8083/borrower/payments/return`.
 
-Additionally, make sure that the following extensions are enabled in your PHP:
+Initial state is `pending`. Simulated success changes it to `paid`; simulated
+decline/failure changes it to `failed`. A pending transaction expires after
+30 minutes. Status lookup and checkout access enforce expiry in the database,
+so no background worker is required. Replayed initiation does not extend the
+expiry. `paid`, `failed`, and `expired` are terminal and cannot be overwritten.
+Refunds, callbacks, webhooks, and real payment methods are not implemented.
 
-- json (enabled by default - don't turn it off)
-- [mysqlnd](http://php.net/manual/en/mysqlnd.install.php) if you plan to use MySQL
-- [libcurl](http://php.net/manual/en/curl.requirements.php) if you plan to use the HTTP\CURLRequest library
+## Tests
+
+Pure request-validation tests:
+
+```powershell
+php vendor\bin\phpunit tests\unit\PaymentPayloadTest.php --no-coverage
+```
+
+Integration tests are opt-in and fail closed unless the dedicated MySQL test
+schema and restricted account pass the isolation checks:
+
+```powershell
+$env:MOCK_PAYMENT_GATEWAY_INTEGRATION = '1'
+php vendor\bin\phpunit tests\integration\PaymentGatewayTest.php --no-coverage --do-not-cache-result --no-logging --testdox
+Remove-Item Env:\MOCK_PAYMENT_GATEWAY_INTEGRATION
+```
+
+They create only their prefixed transaction table in the isolated gateway
+schema and drop that table after the suite. If MySQL is unavailable, the schema
+is missing/nonempty, the test account has access beyond the test schema, or
+development and test credentials are not distinct, setup stops before DDL.
+See [ISOLATED-TESTING.md](../ISOLATED-TESTING.md) for database provisioning
+and TechReserve Phase 2–4 test commands.

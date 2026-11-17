@@ -30,6 +30,19 @@
 # DATABASE
 #--------------------------------------------------------------------
 
+# Isolated PHPUnit MySQL database. The test schema name is fixed in
+# app/Config/Database.php and cannot fall back to the development database.
+database.tests.hostname = 127.0.0.1
+database.tests.username =
+database.tests.password =
+
+# Mock payment API key. Set only in the local .env; never commit its value.
+paymentGateway.apiKey =
+
+# A fixed TechReserve reservation-history URL shown after simulated checkout.
+# This is informational; the gateway does not redirect to arbitrary URLs.
+paymentGateway.techReserveReturnUrl = http://127.0.0.1:8083/borrower/payments/return
+
 # database.default.hostname = localhost
 # database.default.database = ci4
 # database.default.username = root
