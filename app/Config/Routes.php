@@ -14,6 +14,8 @@ $routes->get('checkout/(:segment)/(:segment)/receipt/download', 'Checkout::downl
 $routes->post('checkout/(:segment)/(:segment)/card', 'Checkout::completeCard/$1/$2', ['filter' => 'csrf']);
 $routes->post('checkout/(:segment)/(:segment)/gcash', 'Checkout::beginGcash/$1/$2', ['filter' => 'csrf']);
 $routes->post('checkout/(:segment)/(:segment)/gcash/verify', 'Checkout::completeGcash/$1/$2', ['filter' => 'csrf']);
+$routes->post('checkout/(:segment)/(:segment)/gcash/resend', 'Checkout::resendGcash/$1/$2', ['filter' => 'csrf']);
+$routes->post('checkout/(:segment)/(:segment)/gcash/confirm', 'Checkout::confirmGcash/$1/$2', ['filter' => 'csrf']);
 $routes->post('checkout/(:segment)/(:segment)/success', 'Checkout::settle/$1/$2/paid', ['filter' => 'csrf']);
 $routes->post('checkout/(:segment)/(:segment)/failure', 'Checkout::settle/$1/$2/failed', ['filter' => 'csrf']);
 $routes->post('checkout/(:segment)/(:segment)/cancel', 'Checkout::settle/$1/$2/cancelled', ['filter' => 'csrf']);

@@ -95,12 +95,14 @@ class Checkout extends BaseController
             if ($payment['payment_method'] !== 'gcash') {
                 throw new PaymentException(404, 'checkout_not_found', 'Checkout session not found.');
             }
-            SimulatedPaymentInput::gcashMobile($this->request->getPost() ?? []);
-            return view('checkout', compact('payment', 'token') + [
+            $mobile = SimulatedPaymentInput::gcashMobile($this->request->getPost() ?? []);
+            $challenge = (new PaymentService())->startGcashOtp($reference, $token, $mobile);
+            session()->set('gcash_mobile_' . $reference, $mobile);
+            session()->set('gcash_demo_otp_' . $reference, $challenge['otp']);
+            return view('checkout', ['payment' => $challenge['payment'], 'token' => $token,
                 'returnUrl' => config('PaymentGateway')->techReserveReturnUrl,
                 'error' => null,
-                'gcashVerification' => true,
-            ]);
+                'gcashStage' => 'verify', 'demoOtp' => $challenge['otp']]);
         } catch (PaymentException $exception) {
             return $this->checkoutError($exception->httpStatus, $exception->getMessage());
         } catch (Throwable $exception) {
@@ -116,15 +118,35 @@ class Checkout extends BaseController
             if ($payment['payment_method'] !== 'gcash') {
                 throw new PaymentException(404, 'checkout_not_found', 'Checkout session not found.');
             }
-            $outcome = SimulatedPaymentInput::gcashVerification($this->request->getPost() ?? []);
-            (new PaymentService())->settle($reference, $token, $outcome);
-            return redirect()->to(site_url('checkout/' . rawurlencode($reference) . '/' . rawurlencode($token)));
+            $payment = (new PaymentService())->verifyGcashOtp($reference, $token, (string) $this->request->getPost('verification_code'));
+            session()->remove('gcash_demo_otp_' . $reference);
+            return view('checkout', compact('payment', 'token') + ['returnUrl' => config('PaymentGateway')->techReserveReturnUrl, 'error' => null, 'gcashStage' => 'confirm']);
         } catch (PaymentException $exception) {
             return $this->checkoutError($exception->httpStatus, $exception->getMessage());
         } catch (Throwable $exception) {
             log_message('error', 'Simulated GCash processing failed ({exceptionClass}).', ['exceptionClass' => $exception::class]);
             return $this->checkoutError(503, 'The simulated payment could not be saved.');
         }
+    }
+
+    public function resendGcash(string $reference, string $token)
+    {
+        try {
+            $mobile = session()->get('gcash_mobile_' . $reference);
+            if (!is_string($mobile)) throw new PaymentException(422, 'mobile_required', 'Enter your mobile number again.');
+            $challenge = (new PaymentService())->startGcashOtp($reference, $token, $mobile);
+            session()->set('gcash_demo_otp_' . $reference, $challenge['otp']);
+            return view('checkout', ['payment' => $challenge['payment'], 'token' => $token, 'returnUrl' => config('PaymentGateway')->techReserveReturnUrl, 'error' => null, 'gcashStage' => 'verify', 'demoOtp' => $challenge['otp']]);
+        } catch (PaymentException $exception) { return $this->checkoutError($exception->httpStatus, $exception->getMessage()); }
+    }
+
+    public function confirmGcash(string $reference, string $token)
+    {
+        try {
+            (new PaymentService())->confirmGcash($reference, $token);
+            session()->remove('gcash_mobile_' . $reference); session()->remove('gcash_demo_otp_' . $reference);
+            return redirect()->to(site_url('checkout/' . rawurlencode($reference) . '/' . rawurlencode($token)));
+        } catch (PaymentException $exception) { return $this->checkoutError($exception->httpStatus, $exception->getMessage()); }
     }
 
     private function checkoutError(int $status, string $message)

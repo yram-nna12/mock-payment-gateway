@@ -25,20 +25,16 @@ final class SimulatedPaymentInput
         return $number === '4000000000000002' ? 'failed' : self::outcome($input);
     }
 
-    public static function gcashMobile(array $input): void
+    public static function gcashMobile(array $input): string
     {
-        if (!preg_match('/\A0999000000[1-2]\z/', (string) ($input['mobile_number'] ?? ''))) {
-            throw new PaymentException(422, 'invalid_test_mobile', 'Enter a published TEST MODE mobile number.');
+        $number = preg_replace('/[\s-]/', '', (string) ($input['mobile_number'] ?? ''));
+        if (preg_match('/\A09\d{9}\z/', $number)) {
+            return '+63' . substr($number, 1);
         }
-    }
-
-    public static function gcashVerification(array $input): string
-    {
-        if ((string) ($input['verification_code'] ?? '') !== '000000') {
-            throw new PaymentException(422, 'invalid_test_verification', 'Enter the published TEST MODE verification code.');
+        if (preg_match('/\A\+?639\d{9}\z/', $number)) {
+            return '+' . ltrim($number, '+');
         }
-
-        return self::outcome($input);
+        throw new PaymentException(422, 'invalid_mobile', 'Enter a valid Philippine mobile number.');
     }
 
     private static function outcome(array $input): string

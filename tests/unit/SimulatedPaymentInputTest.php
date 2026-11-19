@@ -6,7 +6,7 @@ use PHPUnit\Framework\TestCase;
 
 final class SimulatedPaymentInputTest extends TestCase
 {
-    public function testAcceptsOnlyPublishedCardAndGcashTestInputs(): void
+    public function testAcceptsCardInputsAndNormalizesValidPhilippineMobileFormats(): void
     {
         $this->assertSame('paid', SimulatedPaymentInput::card([
             'cardholder_name' => 'Test Student',
@@ -22,11 +22,9 @@ final class SimulatedPaymentInputTest extends TestCase
             'card_cvv' => '999',
             'simulated_outcome' => 'paid',
         ]));
-        SimulatedPaymentInput::gcashMobile(['mobile_number' => '09990000001']);
-        $this->assertSame('failed', SimulatedPaymentInput::gcashVerification([
-            'verification_code' => '000000',
-            'simulated_outcome' => 'failed',
-        ]));
+        $this->assertSame('+639171234567', SimulatedPaymentInput::gcashMobile(['mobile_number' => '09171234567']));
+        $this->assertSame('+639171234567', SimulatedPaymentInput::gcashMobile(['mobile_number' => '+639171234567']));
+        $this->assertSame('+639171234567', SimulatedPaymentInput::gcashMobile(['mobile_number' => '639171234567']));
     }
 
     public function testRejectsNonTestSensitiveInputsWithoutRetainingThem(): void
@@ -34,8 +32,8 @@ final class SimulatedPaymentInputTest extends TestCase
         foreach ([
             static fn() => SimulatedPaymentInput::card(['cardholder_name' => 'Test', 'card_number' => '4111111111111111', 'card_expiry' => '12/99', 'card_cvv' => '123']),
             static fn() => SimulatedPaymentInput::card(['cardholder_name' => 'Test', 'card_number' => '4242424242424242', 'card_expiry' => '01/20', 'card_cvv' => '123']),
-            static fn() => SimulatedPaymentInput::gcashMobile(['mobile_number' => '09171234567']),
-            static fn() => SimulatedPaymentInput::gcashVerification(['verification_code' => '123456']),
+            static fn() => SimulatedPaymentInput::gcashMobile(['mobile_number' => '08171234567']),
+            static fn() => SimulatedPaymentInput::gcashMobile(['mobile_number' => '+63917123456A']),
         ] as $operation) {
             try {
                 $operation();

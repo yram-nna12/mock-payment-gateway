@@ -115,6 +115,77 @@ class PaymentService
         });
     }
 
+    public function startGcashOtp(string $reference, string $token, string $mobile): array
+    {
+        return $this->withLocked($reference, function (array $record) use ($reference, $token, $mobile): array {
+            $this->assertCheckoutToken($reference, $token);
+            $record = $this->expireIfDue($record);
+            if ($record['payment_method'] !== 'gcash' || $record['payment_status'] !== 'pending') {
+                throw new PaymentException(409, 'gcash_unavailable', 'This payment cannot be verified.');
+            }
+            $now = gmdate('Y-m-d H:i:s');
+            if (!empty($record['gcash_otp_sent_at']) && strtotime($record['gcash_otp_sent_at']) > time() - 60) {
+                throw new PaymentException(429, 'otp_rate_limited', 'Wait before requesting another demo code.');
+            }
+            $otp = str_pad((string) random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+            $masked = substr($mobile, 0, 4) . '***' . substr($mobile, -4);
+            $update = ['gcash_mobile_masked' => $masked, 'gcash_otp_hash' => password_hash($otp, PASSWORD_DEFAULT),
+                'gcash_otp_expires_at' => gmdate('Y-m-d H:i:s', time() + 300), 'gcash_otp_sent_at' => $now,
+                'gcash_otp_attempts' => 0, 'gcash_otp_verified_at' => null,
+                'gcash_otp_resends' => ((int) ($record['gcash_otp_resends'] ?? 0)) + 1, 'updated_at' => $now];
+            $this->db->table('payment_transactions')->where('id', $record['id'])->update($update);
+            return ['payment' => array_merge($record, $update), 'otp' => $otp];
+        });
+    }
+
+    public function verifyGcashOtp(string $reference, string $token, string $otp): array
+    {
+        return $this->withLocked($reference, function (array $record) use ($reference, $token, $otp): array {
+            $this->assertCheckoutToken($reference, $token);
+            $record = $this->expireIfDue($record);
+            if ($record['payment_method'] !== 'gcash' || $record['payment_status'] !== 'pending'
+                || empty($record['gcash_otp_hash']) || empty($record['gcash_otp_expires_at'])) {
+                throw new PaymentException(409, 'otp_unavailable', 'Request a new demo code.');
+            }
+            if ($record['gcash_otp_expires_at'] <= gmdate('Y-m-d H:i:s')) {
+                throw new PaymentException(422, 'otp_expired', 'The demo code has expired. Request a new code.');
+            }
+            if ((int) $record['gcash_otp_attempts'] >= 5) {
+                throw new PaymentException(429, 'otp_attempts_exceeded', 'Too many incorrect codes. Request a new code.');
+            }
+            if (!preg_match('/\A\d{6}\z/', $otp) || !password_verify($otp, $record['gcash_otp_hash'])) {
+                $this->db->table('payment_transactions')->where('id', $record['id'])->update(['gcash_otp_attempts' => (int) $record['gcash_otp_attempts'] + 1, 'updated_at' => gmdate('Y-m-d H:i:s')]);
+                throw new PaymentException(422, 'invalid_otp', 'The demo code is incorrect.');
+            }
+            $update = ['gcash_otp_verified_at' => gmdate('Y-m-d H:i:s'), 'updated_at' => gmdate('Y-m-d H:i:s')];
+            $this->db->table('payment_transactions')->where('id', $record['id'])->update($update);
+            return array_merge($record, $update);
+        });
+    }
+
+    public function confirmGcash(string $reference, string $token): array
+    {
+        return $this->withLocked($reference, function (array $record) use ($reference, $token): array {
+            $this->assertCheckoutToken($reference, $token);
+            $record = $this->expireIfDue($record);
+            if ($record['payment_method'] !== 'gcash') {
+                throw new PaymentException(409, 'gcash_not_verified', 'Verify the demo code before confirming payment.');
+            }
+            if ($record['payment_status'] === 'paid') {
+                return $record;
+            }
+            if ($record['payment_status'] !== 'pending' || empty($record['gcash_otp_verified_at'])) {
+                throw new PaymentException(409, 'gcash_not_verified', 'Verify the demo code before confirming payment.');
+            }
+            $now = gmdate('Y-m-d H:i:s');
+            $update = ['payment_status' => 'paid', 'paid_at' => $now, 'updated_at' => $now];
+            $this->db->table('payment_transactions')->where('id', $record['id'])->where('payment_status', 'pending')->update($update);
+            $record = array_merge($record, $update);
+            $this->queueWebhookDelivery($record);
+            return $record;
+        });
+    }
+
     private function withLocked(string $reference, callable $operation): array
     {
         $this->db->transException(true);
