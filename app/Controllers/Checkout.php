@@ -15,12 +15,23 @@ class Checkout extends BaseController
     {
         try {
             $payment = (new PaymentService())->checkout($reference, $token);
-            return view('checkout', [
+            $view = [
                 'payment' => $payment,
                 'token' => $token,
                 'returnUrl' => config('PaymentGateway')->techReserveReturnUrl,
                 'error' => null,
-            ]);
+            ];
+            if (in_array($payment['payment_method'], ['card', 'bank_transfer'], true) && $payment['payment_status'] === 'pending') {
+                if (!empty($payment['demo_otp_verified_at'])) {
+                    $view['demoStage'] = 'confirm';
+                } elseif ($otp = session()->get('demo_otp_' . $reference)) {
+                    $view['demoStage'] = 'verify';
+                    $view['demoOtp'] = $otp;
+                }
+                $view['demoMethod'] = $payment['payment_method'];
+                $view['bank'] = session()->get('demo_bank_' . $reference);
+            }
+            return view('checkout', $view);
         } catch (PaymentException $exception) {
             return $this->checkoutError($exception->httpStatus, $exception->getMessage());
         } catch (Throwable $exception) {
@@ -77,15 +88,52 @@ class Checkout extends BaseController
             if ($payment['payment_method'] !== 'card') {
                 throw new PaymentException(404, 'checkout_not_found', 'Checkout session not found.');
             }
-            $outcome = SimulatedPaymentInput::card($this->request->getPost() ?? []);
-            (new PaymentService())->settle($reference, $token, $outcome);
-            return redirect()->to(site_url('checkout/' . rawurlencode($reference) . '/' . rawurlencode($token)));
+            $details = SimulatedPaymentInput::card($this->request->getPost() ?? []);
+            return $this->startDemoOtp($reference, $token, 'card', $details['masked']);
         } catch (PaymentException $exception) {
             return $this->checkoutError($exception->httpStatus, $exception->getMessage());
         } catch (Throwable $exception) {
             log_message('error', 'Simulated card processing failed ({exceptionClass}).', ['exceptionClass' => $exception::class]);
             return $this->checkoutError(503, 'The simulated payment could not be saved.');
         }
+    }
+
+    public function beginBankTransfer(string $reference, string $token)
+    {
+        try {
+            $payment = (new PaymentService())->checkout($reference, $token);
+            if ($payment['payment_method'] !== 'bank_transfer') throw new PaymentException(404, 'checkout_not_found', 'Checkout session not found.');
+            $details = SimulatedPaymentInput::bankTransfer($this->request->getPost() ?? []);
+            session()->set('demo_bank_' . $reference, $details['bank']);
+            return $this->startDemoOtp($reference, $token, 'bank_transfer', $details['masked']);
+        } catch (PaymentException $exception) { return $this->checkoutError($exception->httpStatus, $exception->getMessage()); }
+        catch (Throwable $exception) { log_message('error', 'Simulated bank transfer could not start ({exceptionClass}).', ['exceptionClass' => $exception::class]); return $this->checkoutError(503, 'The simulated verification is temporarily unavailable.'); }
+    }
+
+    public function verifyDemoPayment(string $reference, string $token, string $method)
+    {
+        try {
+            $payment = (new PaymentService())->verifyDemoOtp($reference, $token, $method, (string) $this->request->getPost('verification_code'));
+            session()->remove('demo_otp_' . $reference);
+            return view('checkout', compact('payment', 'token') + ['returnUrl' => config('PaymentGateway')->techReserveReturnUrl, 'error' => null, 'demoStage' => 'confirm', 'demoMethod' => $method, 'bank' => session()->get('demo_bank_' . $reference)]);
+        } catch (PaymentException $exception) { return $this->checkoutError($exception->httpStatus, $exception->getMessage()); }
+        catch (Throwable $exception) { log_message('error', 'Demo payment verification failed ({exceptionClass}).', ['exceptionClass' => $exception::class]); return $this->checkoutError(503, 'The simulated verification is temporarily unavailable.'); }
+    }
+
+    public function confirmDemoPayment(string $reference, string $token, string $method)
+    {
+        try {
+            (new PaymentService())->confirmDemoPayment($reference, $token, $method);
+            session()->remove('demo_otp_' . $reference); session()->remove('demo_bank_' . $reference);
+            return redirect()->to(site_url('checkout/' . rawurlencode($reference) . '/' . rawurlencode($token)));
+        } catch (PaymentException $exception) { return $this->checkoutError($exception->httpStatus, $exception->getMessage()); }
+    }
+
+    private function startDemoOtp(string $reference, string $token, string $method, string $masked): \CodeIgniter\HTTP\ResponseInterface|string
+    {
+        $challenge = (new PaymentService())->startDemoOtp($reference, $token, $method, $masked);
+        session()->set('demo_otp_' . $reference, $challenge['otp']);
+        return view('checkout', ['payment' => $challenge['payment'], 'token' => $token, 'returnUrl' => config('PaymentGateway')->techReserveReturnUrl, 'error' => null, 'demoStage' => 'verify', 'demoMethod' => $method, 'demoOtp' => $challenge['otp'], 'bank' => session()->get('demo_bank_' . $reference)]);
     }
 
     public function beginGcash(string $reference, string $token)

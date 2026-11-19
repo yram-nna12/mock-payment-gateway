@@ -9,20 +9,35 @@ use App\Libraries\PaymentException;
  */
 final class SimulatedPaymentInput
 {
-    public static function card(array $input): string
+    public static function card(array $input): array
     {
         $name = trim((string) ($input['cardholder_name'] ?? ''));
         $number = preg_replace('/[ -]/', '', (string) ($input['card_number'] ?? ''));
-        $expiry = (string) ($input['card_expiry'] ?? '');
+        $month = (string) ($input['card_expiry_month'] ?? '');
+        $year = (string) ($input['card_expiry_year'] ?? '');
         $cvv = (string) ($input['card_cvv'] ?? '');
 
         if ($name === '' || mb_strlen($name) > 100
-            || !is_string($number) || !in_array($number, ['4242424242424242', '4000000000000002'], true)
-            || !self::futureTestExpiry($expiry) || !in_array($cvv, ['123', '999'], true)) {
+            || !is_string($number) || !in_array($number, self::supportedCardNumbers(), true)
+            || !self::luhnValid($number) || !self::futureTestExpiry($month, $year)
+            || preg_match('/\A\d{3,4}\z/', $cvv) !== 1) {
             throw new PaymentException(422, 'invalid_test_card', 'Enter the published TEST MODE card details.');
         }
 
-        return $number === '4000000000000002' ? 'failed' : self::outcome($input);
+        return ['masked' => '•••• ' . substr($number, -4)];
+    }
+
+    public static function bankTransfer(array $input): array
+    {
+        $bank = (string) ($input['bank'] ?? '');
+        $account = preg_replace('/[ -]/', '', (string) ($input['account_number'] ?? ''));
+        $holder = trim((string) ($input['account_holder_name'] ?? ''));
+        $accounts = self::supportedBankAccounts();
+        if (!isset($accounts[$bank]) || !is_string($account) || !in_array($account, $accounts[$bank], true)
+            || $holder === '' || mb_strlen($holder) > 100) {
+            throw new PaymentException(422, 'invalid_demo_bank_transfer', 'Enter published TEST MODE bank-transfer details.');
+        }
+        return ['bank' => $bank, 'masked' => '•••• ' . substr($account, -4)];
     }
 
     public static function gcashMobile(array $input): string
@@ -37,24 +52,32 @@ final class SimulatedPaymentInput
         throw new PaymentException(422, 'invalid_mobile', 'Enter a valid Philippine mobile number.');
     }
 
-    private static function outcome(array $input): string
+    public static function supportedBankAccounts(): array
     {
-        $outcome = $input['simulated_outcome'] ?? 'paid';
-        if (!is_string($outcome) || !in_array($outcome, ['paid', 'failed'], true)) {
-            throw new PaymentException(422, 'invalid_simulation_outcome', 'Choose a supported simulated result.');
-        }
-
-        return $outcome;
+        return ['Demo National Bank' => ['10000001', '10000002'], 'Campus Test Bank' => ['20000001', '20000002']];
     }
 
-    private static function futureTestExpiry(string $expiry): bool
+    public static function supportedCardNumbers(): array
     {
-        if (preg_match('/\A(0[1-9]|1[0-2])\/([0-9]{2})\z/', $expiry, $matches) !== 1) {
+        return ['4242424242424242', '5555555555554444'];
+    }
+
+    private static function futureTestExpiry(string $month, string $year): bool
+    {
+        if (preg_match('/\A(0[1-9]|1[0-2])\z/', $month) !== 1 || preg_match('/\A\d{2}\z/', $year) !== 1) {
             return false;
         }
+        return [2000 + (int) $year, (int) $month] >= [(int) gmdate('Y'), (int) gmdate('n')];
+    }
 
-        $year = 2000 + (int) $matches[2];
-        $month = (int) $matches[1];
-        return [$year, $month] >= [(int) gmdate('Y'), (int) gmdate('n')];
+    private static function luhnValid(string $number): bool
+    {
+        $sum = 0;
+        foreach (array_reverse(str_split($number)) as $index => $digit) {
+            $value = (int) $digit;
+            if ($index % 2 === 1) $value = $value > 4 ? $value * 2 - 9 : $value * 2;
+            $sum += $value;
+        }
+        return $sum % 10 === 0;
     }
 }

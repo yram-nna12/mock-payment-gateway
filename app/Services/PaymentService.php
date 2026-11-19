@@ -186,6 +186,71 @@ class PaymentService
         });
     }
 
+    public function startDemoOtp(string $reference, string $token, string $method, string $maskedIdentifier): array
+    {
+        return $this->withLocked($reference, function (array $record) use ($reference, $token, $method, $maskedIdentifier): array {
+            $this->assertCheckoutToken($reference, $token);
+            $record = $this->expireIfDue($record);
+            if (!in_array($method, ['card', 'bank_transfer'], true) || $record['payment_method'] !== $method || $record['payment_status'] !== 'pending') {
+                throw new PaymentException(409, 'demo_otp_unavailable', 'This payment cannot be verified.');
+            }
+            if (!empty($record['demo_otp_hash']) && empty($record['demo_otp_verified_at'])
+                && ($record['demo_otp_expires_at'] ?? '') > gmdate('Y-m-d H:i:s')) {
+                throw new PaymentException(409, 'demo_otp_active', 'Complete the active demo verification before restarting payment.');
+            }
+            $otp = str_pad((string) random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+            $now = gmdate('Y-m-d H:i:s');
+            $update = ['payment_identifier_masked' => $maskedIdentifier, 'demo_otp_hash' => password_hash($otp, PASSWORD_DEFAULT),
+                'demo_otp_expires_at' => gmdate('Y-m-d H:i:s', time() + 300), 'demo_otp_attempts' => 0,
+                'demo_otp_verified_at' => null, 'updated_at' => $now];
+            $this->db->table('payment_transactions')->where('id', $record['id'])->update($update);
+            return ['payment' => array_merge($record, $update), 'otp' => $otp];
+        });
+    }
+
+    public function verifyDemoOtp(string $reference, string $token, string $method, string $otp): array
+    {
+        return $this->withLocked($reference, function (array $record) use ($reference, $token, $method, $otp): array {
+            $this->assertCheckoutToken($reference, $token);
+            $record = $this->expireIfDue($record);
+            if ($record['payment_method'] !== $method || $record['payment_status'] !== 'pending' || empty($record['demo_otp_hash'])) {
+                throw new PaymentException(409, 'otp_unavailable', 'Restart this demo payment to request a new code.');
+            }
+            if (($record['demo_otp_expires_at'] ?? '') <= gmdate('Y-m-d H:i:s')) {
+                throw new PaymentException(422, 'otp_expired', 'The demo code has expired. Restart this demo payment.');
+            }
+            if ((int) $record['demo_otp_attempts'] >= 5) {
+                throw new PaymentException(429, 'otp_attempts_exceeded', 'Too many incorrect codes. Restart this demo payment.');
+            }
+            if (!preg_match('/\A\d{6}\z/', $otp) || !password_verify($otp, $record['demo_otp_hash'])) {
+                $this->db->table('payment_transactions')->where('id', $record['id'])->update(['demo_otp_attempts' => (int) $record['demo_otp_attempts'] + 1, 'updated_at' => gmdate('Y-m-d H:i:s')]);
+                throw new PaymentException(422, 'invalid_otp', 'The demo code is incorrect.');
+            }
+            $update = ['demo_otp_verified_at' => gmdate('Y-m-d H:i:s'), 'updated_at' => gmdate('Y-m-d H:i:s')];
+            $this->db->table('payment_transactions')->where('id', $record['id'])->update($update);
+            return array_merge($record, $update);
+        });
+    }
+
+    public function confirmDemoPayment(string $reference, string $token, string $method): array
+    {
+        return $this->withLocked($reference, function (array $record) use ($reference, $token, $method): array {
+            $this->assertCheckoutToken($reference, $token);
+            $record = $this->expireIfDue($record);
+            if ($record['payment_method'] !== $method || ($record['payment_status'] === 'pending' && empty($record['demo_otp_verified_at']))) {
+                throw new PaymentException(409, 'payment_not_verified', 'Verify the demo code before confirming payment.');
+            }
+            if ($record['payment_status'] === 'paid') return $record;
+            if ($record['payment_status'] !== 'pending') throw new PaymentException(409, 'payment_not_pending', 'This payment can no longer be confirmed.');
+            $now = gmdate('Y-m-d H:i:s');
+            $update = ['payment_status' => 'paid', 'paid_at' => $now, 'updated_at' => $now];
+            $this->db->table('payment_transactions')->where('id', $record['id'])->where('payment_status', 'pending')->update($update);
+            $record = array_merge($record, $update);
+            $this->queueWebhookDelivery($record);
+            return $record;
+        });
+    }
+
     private function withLocked(string $reference, callable $operation): array
     {
         $this->db->transException(true);
