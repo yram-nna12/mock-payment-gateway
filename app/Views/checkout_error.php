@@ -1,15 +1,1 @@
-<!doctype html>
-<html lang="en">
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Checkout unavailable</title>
-    <link rel="stylesheet" href="<?= base_url('css/checkout.css') ?>">
-</head>
-<body>
-<main>
-    <h1>Checkout unavailable</h1>
-    <p role="alert"><?= esc($message) ?></p>
-</main>
-</body>
-</html>
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Checkout unavailable</title><link rel="stylesheet" href="<?= base_url('css/checkout.css?v=20261123-2') ?>"></head><body><main class="checkout-shell"><header class="checkout-header"><span class="gateway-brand"><span class="material-symbols-outlined" aria-hidden="true">payments</span>Mock Payment Gateway</span><span class="demo-pill">TEST MODE</span></header><section class="checkout-card payment-result failed"><span class="material-symbols-outlined" aria-hidden="true">error</span><h1>Checkout unavailable</h1><p role="alert"><?= esc($message) ?></p></section></main></body></html>
