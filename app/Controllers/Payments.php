@@ -24,7 +24,7 @@ class Payments extends BaseController
             $created = (new PaymentService())->initiate($input);
             $existing = !($created['created'] ?? false);
             unset($created['created']);
-            return $this->response->setStatusCode($existing ? 200 : 201)->setJSON(['data' => $created]);
+            return $this->signedResponse(['data' => $created], $existing ? 200 : 201);
         } catch (PaymentException $exception) {
             return $this->error($exception->httpStatus, $exception->errorCode, $exception->getMessage());
         } catch (Throwable $exception) {
@@ -36,13 +36,25 @@ class Payments extends BaseController
     public function show(string $reference)
     {
         try {
-            return $this->response->setJSON(['data' => (new PaymentService())->status($reference)]);
+            return $this->signedResponse(['data' => (new PaymentService())->status($reference)], 200);
         } catch (PaymentException $exception) {
             return $this->error($exception->httpStatus, $exception->errorCode, $exception->getMessage());
         } catch (Throwable $exception) {
             log_message('error', 'Payment status lookup failed ({exceptionClass}).', ['exceptionClass' => $exception::class]);
             return $this->error(503, 'payment_service_unavailable', 'The payment service is temporarily unavailable.');
         }
+    }
+
+    private function signedResponse(array $data, int $status)
+    {
+        $response = $this->response->setStatusCode($status)->setJSON($data);
+        $nonce = $this->request->getHeaderLine('X-Payment-Response-Nonce');
+        $secret = config('PaymentGateway')->webhookSecret;
+        if (preg_match('/\A[a-f0-9]{64}\z/', $nonce) && $secret !== '') {
+            $signature = hash_hmac('sha256', "techreserve-response-v1\n" . $nonce . "\n" . $response->getBody(), $secret);
+            $response->setHeader('X-Payment-Response-Signature', 'v1=' . $signature);
+        }
+        return $response;
     }
 
     private function error(int $status, string $code, string $message)

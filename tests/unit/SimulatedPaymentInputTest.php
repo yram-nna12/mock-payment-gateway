@@ -6,40 +6,49 @@ use PHPUnit\Framework\TestCase;
 
 final class SimulatedPaymentInputTest extends TestCase
 {
-    public function testAcceptsCardInputsAndNormalizesValidPhilippineMobileFormats(): void
+    public function testAcceptsMultipleFictionalValuesAndReturnsOnlyMaskedDetails(): void
     {
-        $this->assertSame(['masked' => '•••• 4242'], SimulatedPaymentInput::card([
-            'cardholder_name' => 'Test Student',
-            'card_number' => '4242 4242 4242 4242',
-            'card_expiry_month' => '12', 'card_expiry_year' => '99',
-            'card_cvv' => '123',
-        ]));
-        $this->assertSame(['masked' => '•••• 4444'], SimulatedPaymentInput::card([
-            'cardholder_name' => 'Test Student',
-            'card_number' => '5555 5555 5555 4444',
-            'card_expiry_month' => '12', 'card_expiry_year' => '99',
-            'card_cvv' => '999',
-        ]));
-        $this->assertSame(['bank' => 'Demo National Bank', 'masked' => '•••• 0001'], SimulatedPaymentInput::bankTransfer(['bank' => 'Demo National Bank', 'account_number' => '10000001', 'account_holder_name' => 'Test Student']));
+        foreach (['0000123456789012', '0000999988887777'] as $number) {
+            $result = SimulatedPaymentInput::card(['cardholder_name' => 'Fictional Student', 'card_number' => $number,
+                'card_expiry_month' => '12', 'card_expiry_year' => '99', 'card_cvv' => '123']);
+            $this->assertSame(substr($number, -4), substr($result['masked'], -4));
+            $this->assertStringNotContainsString($number, json_encode($result));
+            $this->assertArrayNotHasKey('card_cvv', $result);
+        }
+        foreach ([['Demo National Bank', '00001234'], ['Demo National Bank', '00009876'],
+            ['Campus Test Bank', '0000123456'], ['Campus Test Bank', '0000987654']] as [$bank, $number]) {
+            $result = SimulatedPaymentInput::bankTransfer(['bank' => $bank, 'account_number' => $number, 'account_holder_name' => 'Fictional Student']);
+            $this->assertSame($bank, $result['bank']);
+            $this->assertSame(substr($number, -4), substr($result['masked'], -4));
+            $this->assertStringNotContainsString($number, json_encode($result));
+        }
         $this->assertSame('+639171234567', SimulatedPaymentInput::gcashMobile(['mobile_number' => '09171234567']));
-        $this->assertSame('+639171234567', SimulatedPaymentInput::gcashMobile(['mobile_number' => '+639171234567']));
-        $this->assertSame('+639171234567', SimulatedPaymentInput::gcashMobile(['mobile_number' => '639171234567']));
+        $this->assertSame('+639181234568', SimulatedPaymentInput::gcashMobile(['mobile_number' => '+639181234568']));
+        $this->assertSame('+639191234569', SimulatedPaymentInput::gcashMobile(['mobile_number' => '639191234569']));
     }
 
-    public function testRejectsNonTestSensitiveInputsWithoutRetainingThem(): void
+    public function testRejectsInvalidFormatsWithoutEchoingValues(): void
     {
+        $card = ['cardholder_name' => 'Fictional Student', 'card_number' => '0000123456789012',
+            'card_expiry_month' => '12', 'card_expiry_year' => '99', 'card_cvv' => '123'];
+        $bank = ['bank' => 'Demo National Bank', 'account_number' => '00001234', 'account_holder_name' => 'Fictional Student'];
         foreach ([
-            static fn() => SimulatedPaymentInput::card(['cardholder_name' => 'Test', 'card_number' => '4111111111111111', 'card_expiry_month' => '12', 'card_expiry_year' => '99', 'card_cvv' => '123']),
-            static fn() => SimulatedPaymentInput::card(['cardholder_name' => 'Test', 'card_number' => '4242424242424242', 'card_expiry_month' => '01', 'card_expiry_year' => '20', 'card_cvv' => '123']),
-            static fn() => SimulatedPaymentInput::card(['cardholder_name' => 'Test', 'card_number' => '4242424242424242', 'card_expiry_month' => '12', 'card_expiry_year' => '99', 'card_cvv' => '12']),
-            static fn() => SimulatedPaymentInput::bankTransfer(['bank' => 'Demo National Bank', 'account_number' => '99999999', 'account_holder_name' => 'Test']),
-            static fn() => SimulatedPaymentInput::bankTransfer(['bank' => 'Demo National Bank', 'account_number' => '10000001', 'account_holder_name' => '']),
+            static fn() => SimulatedPaymentInput::card(array_replace($card, ['card_number' => '4111111111111111'])),
+            static fn() => SimulatedPaymentInput::card(array_replace($card, ['card_number' => '0000123'])),
+            static fn() => SimulatedPaymentInput::card(array_replace($card, ['card_number' => '000012345678901x'])),
+            static fn() => SimulatedPaymentInput::card(array_replace($card, ['card_expiry_year' => '20'])),
+            static fn() => SimulatedPaymentInput::card(array_replace($card, ['card_cvv' => '12'])),
+            static fn() => SimulatedPaymentInput::card(array_replace($card, ['cardholder_name' => ''])),
+            static fn() => SimulatedPaymentInput::bankTransfer(array_replace($bank, ['account_number' => '0000123456'])),
+            static fn() => SimulatedPaymentInput::bankTransfer(array_replace($bank, ['account_number' => '12345678'])),
+            static fn() => SimulatedPaymentInput::bankTransfer(array_replace($bank, ['bank' => 'Unknown'])),
+            static fn() => SimulatedPaymentInput::bankTransfer(array_replace($bank, ['account_holder_name' => ''])),
             static fn() => SimulatedPaymentInput::gcashMobile(['mobile_number' => '08171234567']),
             static fn() => SimulatedPaymentInput::gcashMobile(['mobile_number' => '+63917123456A']),
         ] as $operation) {
             try {
                 $operation();
-                $this->fail('A non-test sensitive input was accepted.');
+                $this->fail('An invalid input was accepted.');
             } catch (PaymentException $exception) {
                 $this->assertSame(422, $exception->httpStatus);
                 $this->assertStringNotContainsString('4111111111111111', $exception->getMessage());
